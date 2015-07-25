@@ -1,0 +1,10 @@
+Metadata-Version: 1.0
+Name: qiniucmd
+Version: 1.0
+Summary: Command line tool for managing Qiniu Resource Storage
+Home-page: http://github.com/colynn
+Author: Colynn Liu
+Author-email: colynnliu@foxmail.com
+License: UNKNOWN
+Description: qiniucmd is a command line tool for uploading,retrieving and managing data in QiNiu Resource Storage.
+Platform: UNKNOWN

@@ -1,0 +1,262 @@
+#! /usr/bin/env python
+#coding=utf-8
+# Description: qiniucmd is a command line tool for uploading,
+# retrieving and managing data in QiNiu Resource Storage.
+#===========================================================
+# Author: colynn.liu
+# Email:colynnliu@foxmail.com
+# License: GPL Version 2
+# learn from s3tools(s3tools.org)
+
+import sys
+reload(sys)
+sys.setdefaultencoding('utf-8')
+if float("%d.%d" % (sys.version_info[0], sys.version_info[1])) < 2.4:
+    sys.stderr.write("ERROR: Python 2.4 or higher required, sorry.\n")
+    sys.exit(1)
+
+from os.path import basename,isfile
+import json
+import ConfigParser
+from base64 import b64encode,b64decode
+
+from qiniu import Auth
+from qiniu import config as qiniuconfig
+from qiniu import BucketManager
+from qiniu import put_file
+from qiniu import etag
+
+CONFIGFILE="/etc/.qiniu.conf"
+SECRET='}0;&KlQpLOZssxs(*%^3Kf{Q8*7Pp.+L.SgFDk,[~$co[q)Tb/_nMVSw2(D1b;o8asdsds'
+
+def check_localfile(localfile):
+    if not isfile(localfile):
+        print "%s is not existed!" % localfile
+        sys.exit(1)
+
+class qiniu_config(object):
+    def __init__(self,cnffile):
+        self.qiniucnf = {}
+        self.status = True
+        try:
+            config = self.read_config(cnffile)
+            self.qiniucnf['access_key'] = str(self.decode(config.get("qiniu","access_key"),SECRET))
+            self.qiniucnf['secret_key'] = str(self.decode(config.get("qiniu","secret_key"),SECRET))
+            self.qiniucnf['bucket'] = config.get("qiniu","bucket")
+            self.qiniucnf['retries'] = config.get("options", 'connection_retries')
+            self.qiniucnf['timeout'] = config.get("options", 'connection_timeout')
+            self.qiniucnf['connection_pool'] = config.get("options", 'connection_pool')
+        except Exception,e:
+            print '*** Caught exception - Configuration File Error: %s :\n%s: %s\n' % (cnffile ,e.__class__, e)
+            self.status = False
+
+    def read_config(self,cnfconfig):
+        '''
+        read qiniu config file, return config instance
+        '''
+        config = ConfigParser.ConfigParser()
+        config.readfp(open(cnfconfig))
+        return config
+
+    def encode(self,unicodeString,key):
+        """
+        for safe: encode password & store it into config filef
+        """
+        strorg = unicodeString.encode('utf-8')
+        strlength = len(strorg)
+        baselength = len(key)
+        hh = []
+        for i in range(strlength):
+            hh.append(chr((ord(strorg[i])+ord(key[i % baselength]))%256))
+        return b64encode(''.join(hh))
+
+    def decode(self,orig,key):
+        """
+        for safe: read config file & decode password
+        """
+        strorg = b64decode(orig.encode('utf-8'))
+        strlength=len(strorg)
+        keylength=len(key)
+        hh=[]
+        for i in range(strlength):
+            hh.append((ord(strorg[i])-ord(key[i%keylength]))%256)
+        return ''.join(chr(i) for i in hh).decode('utf-8')
+
+    def write_config(self):
+        '''
+        '''
+        print "[INFO]: Start to config QiNiu Storage Service."
+        access_key = raw_input("Please input your AccessKey: ")
+        secret_key = raw_input("Please input your SecretKey: ")
+        bucket = raw_input("Please input your bucket: ")
+        
+        try:
+            Access = self.encode(access_key,SECRET)
+            Secret = self.encode(secret_key,SECRET)
+        except Exception,e:
+            print "[ERROR]: Failed to encrypt the Access_key/SecretKey\n %s" % e
+            sys.exit(1)
+        config = ConfigParser.RawConfigParser()
+        config.add_section("qiniu")
+        config.add_section("options")
+
+        config.set("qiniu", 'access_key', Access)
+        config.set("qiniu", 'secret_key', Secret)
+        config.set("qiniu", 'bucket', bucket)
+        config.set("options", 'connection_retries', 3)
+        config.set("options", 'connection_timeout', 15)
+        config.set("options", 'connection_pool', 10)
+        cfgfile = open(CONFIGFILE, 'w+')
+        config.write(cfgfile)
+        print "Backup Configuration is saved into %s." % CONFIGFILE
+        cfgfile.close()
+
+class qiniu_api(object):
+    def __init__(self,cnfconfig):
+        self.cnfconfig = cnfconfig
+        self.q = Auth(self.cnfconfig['access_key'], self.cnfconfig['secret_key'])
+        self.bucket = BucketManager(self.q)
+        self.bucket_name = self.cnfconfig['bucket']
+        # set connect options
+        qiniuconfig.set_default(connection_retries = int(self.cnfconfig['retries']))
+        qiniuconfig.set_default(connection_timeout = int(self.cnfconfig['timeout']))
+        qiniuconfig.set_default(connection_pool = int(self.cnfconfig['connection_pool']))
+        
+    def list_all(self, prefix=None, limit=None):
+        '''
+        list all files of this backet_name.
+        will return files list.
+        '''
+        key_list = []
+        marker = None
+        eof = False
+        while eof is False:
+            ret, eof, info = self.bucket.list(self.bucket_name, prefix=prefix, marker=marker, limit=limit)
+            marker = ret.get('marker', None)
+            for item in ret['items']:
+                key_list.append(item['key'])
+                pass
+        if eof is not True:
+            pass
+        return key_list
+    def key_text_hash(self, key_name):
+        '''
+        get key_name text_body info, return hash
+        '''
+        ret,info = self.bucket.stat(self.bucket_name, key_name)
+        return json.loads(info.text_body)['hash']
+
+    def stat_hash(self, key_name = None ):
+        '''
+        return stat_hash dict type, 
+        if key_name is None, will return all files hash of current bucket.
+        '''
+        stat_hash = {}
+        if key_name is None:
+            for key_name in self.list_all():
+                stat_hash[key_name] = self.key_text_hash(key_name)
+        else:        
+            stat_hash[key_name] = self.key_text_hash(key_name)
+        return stat_hash
+
+    def upload(self, localfile, key_name = None):
+        '''
+        upload local_file, storage name is key_name
+        return upload status and hash value.
+        return code:
+          0 upload status succeed, etag value is true.
+          1 upload status succeed, etag value is false.
+          2 upload status failed, etag value is false.
+          3 exist duplicate file, directly return.
+        '''
+        check_localfile(localfile)
+        localfile_name = basename(localfile)
+        if key_name is None:
+            key_name = localfile_name
+        key = key_name
+
+        # if key in self.list_all():
+        #    return 3
+        token = self.q.upload_token(self.bucket_name, key)
+        params = {'x:a': 'a'}
+        progress_handler = lambda progress, total: progress
+        ret, info = put_file(token, key, localfile_name, params, progress_handler=progress_handler)
+
+        if info.status_code == 200:
+            key_info=json.loads(info.text_body)
+            assert ret['hash'] == etag(localfile)
+            if key_info['hash'] == ret['hash']:
+                return 0
+            else:
+                return 1 
+        else:
+            return 2
+
+    def download(self, key_name):
+        '''
+        download specific storage file.
+        '''
+        import requests
+        key = key_name
+        bucket_domain = '7xkfid.com1.z0.glb.clouddn.com'
+        base_url = 'http://%s/%s' % (bucket_domain, key)
+        private_url = self.q.private_download_url(base_url, expires=3600)
+        dfile = requests.get(private_url)
+        with open(key, 'wb') as code:
+            code.write(dfile.content)
+        key_hash = self.stat_hash(key)[key]
+        download_hash = etag(key)
+        if (key_hash == download_hash):
+            print key + " download succeed."
+        else:
+            print key + " download file is not complete."
+
+    def delete(self, key_name):
+        '''
+        delete specific storage file.
+        return code:
+            0 succeed; 1 failed
+        '''
+        ret, info = self.bucket.delete(self.bucket_name,key_name)
+        if info.status_code == 200:
+            return 0
+        else:
+            return 1
+
+def main():
+    from optparse import OptionParser
+    parser = OptionParser()
+    parser.add_option("-u", "--upload", dest="filename", help="upload a file to your bucket ")
+    parser.add_option("-d", "--download", dest="downloadfile", help="from your bucket download a file ")
+    parser.add_option("-l", "--list", action="store_true", dest="list", help="list files in your bucket ")
+    parser.add_option("", "--delete", dest="delete", help="from your bucket delete a file ")
+    (options, args) = parser.parse_args()
+
+    cnf = qiniu_config(CONFIGFILE)
+    if not cnf.status:
+        print "ERROR: Can't load config file: %s" % CONFIGFILE
+        cnf.write_config()
+        sys.exit(0)
+
+    cnfdict = cnf.qiniucnf
+    qn = qiniu_api(cnfdict)
+    if options.filename:
+        status = qn.upload(options.filename)
+        print status
+        sys.exit(0)
+    if options.delete:
+        status = qn.delete(options.delete)
+        print status
+        sys.exit(0)
+    if options.list:
+        line_num = 1
+        for key_name in qn.list_all():
+            print " " + str(line_num) + "  " + key_name
+            line_num += 1 
+        sys.exit(0)
+    if options.downloadfile:
+        qn.download(options.downloadfile)
+        sys.exit(0)
+
+if __name__ == '__main__':
+    main()
