@@ -31,8 +31,8 @@ SECRET='}0;&KlQpLOZssxs(*%^3Kf{Q8*7Pp.+L.SgFDk,[~$co[q)Tb/_nMVSw2(D1b;o8asdsds'
 
 def check_localfile(localfile):
     if not isfile(localfile):
-        print "%s is not existed!" % localfile
-        sys.exit(1)
+        print "%s is not a regular file!" % localfile
+        return -1
 
 class qiniu_config(object):
     def __init__(self,cnffile):
@@ -164,6 +164,7 @@ class qiniu_api(object):
         upload local_file, storage name is key_name
         return upload status and hash value.
         return code:
+         -1 localfile is not a regular file
           0 upload status succeed, etag value is true.
           1 upload status succeed, etag value is false.
           2 upload status failed, etag value is false.
@@ -180,7 +181,7 @@ class qiniu_api(object):
         token = self.q.upload_token(self.bucket_name, key)
         params = {'x:a': 'a'}
         progress_handler = lambda progress, total: progress
-        ret, info = put_file(token, key, localfile_name, params, progress_handler=progress_handler)
+        ret, info = put_file(token, key, localfile, params, progress_handler=progress_handler)
 
         if info.status_code == 200:
             key_info=json.loads(info.text_body)
@@ -189,6 +190,7 @@ class qiniu_api(object):
                 return 0
             else:
                 return 1 
+	    return 0
         else:
             return 2
 
@@ -250,6 +252,7 @@ def main():
         sys.exit(0)
     if options.list:
         line_num = 1
+	print "backup list:"
         for key_name in qn.list_all():
             print " " + str(line_num) + "  " + key_name
             line_num += 1 
