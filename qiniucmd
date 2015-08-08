@@ -125,7 +125,9 @@ class qiniu_api(object):
     def list_all(self, prefix=None, limit=None):
         '''
         list all files of this backet_name.
-        will return files list.
+        will return key_info list.
+        eg:
+        key_list =[{'hash': u'FtLsuuVyqU-NDGsnHogO6HVPRWpZ', 'key': u'qiniucmd.pyc', 'putTime': 14385883971400067}, {'hash': u'FtLsuuVyqU-NDGsnHogO6HVPRWpZ', 'key': u'qiniucmd.pyc', 'putTime': 14385883971400067}]
         '''
         key_list = []
         marker = None
@@ -134,30 +136,24 @@ class qiniu_api(object):
             ret, eof, info = self.bucket.list(self.bucket_name, prefix=prefix, marker=marker, limit=limit)
             marker = ret.get('marker', None)
             for item in ret['items']:
-                key_list.append(item['key'])
-                pass
+                key_info = {}
+                key_info['key'] = item['key']
+                key_info['hash'] = item['hash']
+                key_info['putTime'] = item['putTime']
+                key_list.append(key_info)
         if eof is not True:
-            pass
+            return None
         return key_list
-    def key_text_hash(self, key_name):
+
+    def key_text_hash(self, key_name = None):
         '''
         get key_name text_body info, return hash
         '''
-        ret,info = self.bucket.stat(self.bucket_name, key_name)
-        return json.loads(info.text_body)['hash']
-
-    def stat_hash(self, key_name = None ):
-        '''
-        return stat_hash dict type, 
-        if key_name is None, will return all files hash of current bucket.
-        '''
-        stat_hash = {}
-        if key_name is None:
-            for key_name in self.list_all():
-                stat_hash[key_name] = self.key_text_hash(key_name)
-        else:        
-            stat_hash[key_name] = self.key_text_hash(key_name)
-        return stat_hash
+        if key_name != None:
+            ret,info = self.bucket.stat(self.bucket_name, key_name)
+            return json.loads(info.text_body)['hash']
+        else:
+            return "key_name not specified."
 
     def upload(self, localfile, key_name = None):
         '''
@@ -205,7 +201,7 @@ class qiniu_api(object):
         dfile = requests.get(private_url)
         with open(key, 'wb') as code:
             code.write(dfile.content)
-        key_hash = self.stat_hash(key)[key]
+        key_hash = self.key_text_hash(key)
         download_hash = etag(key)
         if (key_hash == download_hash):
             print key + " download succeed."
@@ -253,7 +249,7 @@ def main():
         line_num = 1
 	print "backup list:"
         for key_name in qn.list_all():
-            print " " + str(line_num) + "  " + key_name
+            print " " + str(line_num) + "  " + key_name['key']
             line_num += 1 
         sys.exit(0)
     if options.downloadfile:
