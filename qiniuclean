@@ -1,0 +1,192 @@
+#! /usr/bin/env python
+#coding=utf-8
+# Description: qiniuclean is a command line tool for automatic clean data in QiNiu Resource Storage.
+#===========================================================
+# Author: colynn.liu
+# Email:colynnliu@foxmail.com
+# License: GPL Version 2
+
+import sys
+reload(sys)
+sys.setdefaultencoding('utf-8')
+if float("%d.%d" % (sys.version_info[0], sys.version_info[1])) < 2.4:
+    sys.stderr.write("ERROR: Python 2.4 or higher required, sorry.\n")
+    sys.exit(1)
+
+import ConfigParser
+import datetime,time
+from os.path import basename,isfile
+
+from qiniucmd import CONFIGFILE,SECRET
+from qiniucmd import qiniu_config,qiniu_api
+
+CONFIG_CLEAN_FILE = "/etc/qiniu_auto_clean.conf"
+
+
+def check_localfile(localfile):
+    if not isfile(localfile):
+        print "%s is not a regular file!" % localfile
+        return -1
+
+def server_list(key_list=[]):
+    '''
+    return server_list of remove duplicate
+    '''
+    srv_list = []
+    for key in key_list:
+        try:
+            server = key.split('_')[2]
+            srv_list.append(server)
+        except IndexError:
+            pass
+    srv_list = list(set(srv_list))
+    return srv_list
+
+class qiniu_clean(object):
+    def __init__(self, key_list, cnffile=CONFIG_CLEAN_FILE):
+        self.Today = datetime.date.today()
+        self.keyList = key_list
+        self.cleancnf = {}
+        self.status = True
+        try:
+            config = self.read_clean_config(cnffile)
+            self.cleancnf['daily'] = config.get("default", 'daily_keep')
+            self.cleancnf['week'] = config.get("default", 'week_keep')
+            self.cleancnf['month'] = config.get("default", 'month_keep')
+        except Exception,e:
+            print '*** Caught exception - Configuration File Error: %s :\n%s: %s\n' % (cnffile ,e.__class__, e)
+            self.status = False
+
+    def read_clean_config(self,cnfconfig):
+        '''
+        read qiniu_auto_clean config file, return config instance
+        '''
+        config = ConfigParser.ConfigParser()
+        config.readfp(open(cnfconfig))
+        return config
+
+    def get_month(self,monthNum):
+        if (monthNum == 0):
+            M = self.Today.replace(day=1)
+            M = M.__format__("%y%m%d")
+            return M
+        else:
+            M = (self.Today.replace(day=1) - datetime.timedelta(30*monthNum)).replace(day=1)
+            M = M.__format__("%y%m%d")
+            return M
+
+    def get_week(self,weekNum):
+        '''
+        return the format of 150801 datetime.
+        '''
+        Day = self.Today.weekday()
+        # firstDay the first day of the week
+        firstDay = self.Today - datetime.timedelta(Day)
+        W = firstDay.__format__("%y%m%d")
+        if (weekNum == 0):
+            return W
+        else:
+            W = (firstDay - datetime.timedelta(7*weekNum))
+            W = W.__format__("%y%m%d")
+            return W
+
+    def get_daily(self,dailyNum):
+        D = self.Today.__format__("%y%m%d")
+        if (dailyNum == 0):
+            return D
+        else:
+            D = (self.Today - datetime.timedelta(dailyNum))
+            D = D.__format__("%y%m%d")
+            return D
+
+    def backup_keep(self):
+        '''
+        return remain list of backup.
+        '''
+        Daily = []
+        Week = []
+        Month = []
+        for Num in range(int(self.cleancnf['month'])):
+            M = self.get_month(Num)
+            Month.append(M)
+
+        for Num in range(int(self.cleancnf['week'])):
+            W = self.get_week(Num)
+            Week.append(W)
+
+        for Num in range(int(self.cleancnf['daily'])):
+            D = self.get_daily(Num)
+            Daily.append(D)
+
+        Day = []
+        Day.extend(Daily)
+        Day.extend(Week)
+        Day.extend(Month)
+        
+        Days = list(set(Day))
+        return Days
+
+    def backup_info(self,key_list):
+        bk_info = []
+        for key in key_list:
+            timeStamp = key['putTime']
+            timeStamp = timeStamp/10000000
+            putTime = time.localtime(timeStamp)
+            timeFormat = time.strftime("%y%m%d", putTime)
+            key_info = {}
+            key_info['putTime'] = timeFormat
+            key_info['key'] = key['key']
+            bk_info.append(key_info) 
+        return bk_info
+
+    def backup_clean(self):
+        '''
+        '''
+        delete_list = []
+        keep = self.backup_keep()
+        print keep
+        bk_info = self.backup_info(self.keyList)
+        for key in bk_info:
+            if key['putTime'] not in keep:
+                delete_list.append(key['key'])
+        return delete_list
+
+def main():
+    from optparse import OptionParser
+    parser = OptionParser()
+    parser.add_option("-l", "--list", action="store_true", dest="list", help="list files in your bucket ")
+    parser.add_option("", "--delete", dest="delete", help="from your bucket delete a file ")
+    (options, args) = parser.parse_args()
+
+    cnf = qiniu_config(CONFIGFILE)
+    if not cnf.status:
+        print "ERROR: Can't load config file: %s" % CONFIGFILE
+        cnf.write_config()
+        sys.exit(0)
+
+    cnfdict = cnf.qiniucnf
+    qn = qiniu_api(cnfdict)
+    if options.delete:
+        status = qn.delete(options.delete)
+        print status
+        sys.exit(0)
+    if options.list:
+        line_num = 1
+        print "backup list:"
+        for key_name in qn.list_all():
+            print " " + str(line_num) + "  " + key_name['key']
+            line_num += 1 
+        sys.exit(0)
+
+
+    key_list = qn.list_all()
+
+    # the Instantiation of qiniu_clean class. 
+    qclean=qiniu_clean(key_list)
+    dlist = qclean.backup_clean()
+    for i in dlist:
+        print i,qn.delete(i)
+
+if __name__ == '__main__':
+    main()
+
