@@ -15,32 +15,18 @@ if float("%d.%d" % (sys.version_info[0], sys.version_info[1])) < 2.4:
 
 import ConfigParser
 import datetime,time
-from os.path import basename,isfile
+import os
 
 from qiniucmd import CONFIGFILE,SECRET
 from qiniucmd import qiniu_config,qiniu_api
 
+DATE = time.strftime("%Y%m%d-%H:%M")
 CONFIG_CLEAN_FILE = "/etc/qiniu_auto_clean.conf"
 
-
-def check_localfile(localfile):
-    if not isfile(localfile):
-        print "%s is not a regular file!" % localfile
+def check_dir(dirName):
+    if not os.path.exists(dirName):
+        print "%s directory is not exist!" % dirName
         return -1
-
-def server_list(key_list=[]):
-    '''
-    return server_list of remove duplicate
-    '''
-    srv_list = []
-    for key in key_list:
-        try:
-            server = key.split('_')[2]
-            srv_list.append(server)
-        except IndexError:
-            pass
-    srv_list = list(set(srv_list))
-    return srv_list
 
 class qiniu_clean(object):
     def __init__(self, key_list, cnffile=CONFIG_CLEAN_FILE):
@@ -53,6 +39,7 @@ class qiniu_clean(object):
             self.cleancnf['daily'] = config.get("default", 'daily_keep')
             self.cleancnf['week'] = config.get("default", 'week_keep')
             self.cleancnf['month'] = config.get("default", 'month_keep')
+            self.cleancnf['logfile'] = config.get("default", 'logfile')
         except Exception,e:
             print '*** Caught exception - Configuration File Error: %s :\n%s: %s\n' % (cnffile ,e.__class__, e)
             self.status = False
@@ -91,6 +78,11 @@ class qiniu_clean(object):
             return W
 
     def get_daily(self,dailyNum):
+        '''
+        return the after calculation of time. 
+        eg:
+        150801
+        '''
         D = self.Today.__format__("%y%m%d")
         if (dailyNum == 0):
             return D
@@ -101,7 +93,9 @@ class qiniu_clean(object):
 
     def backup_keep(self):
         '''
-        return remain list of backup.
+        return remain list of backup time.
+        eg:
+        ['150801','150802','150803']
         '''
         Daily = []
         Week = []
@@ -123,10 +117,16 @@ class qiniu_clean(object):
         Day.extend(Week)
         Day.extend(Month)
         
+        # Remove duplicate operations of calculation time
         Days = list(set(Day))
         return Days
 
     def backup_info(self,key_list):
+        '''
+        return the list of backup file:
+        eg:
+        [{'key': '150803_0300_abc.tar.gz','putTime': '150803'}, {'key': '150801_0300_efg.tar.gz','putTime': '150801'}]
+        '''
         bk_info = []
         for key in key_list:
             timeStamp = key['putTime']
@@ -141,21 +141,47 @@ class qiniu_clean(object):
 
     def backup_clean(self):
         '''
+        return the list of deleted file.
+        eg:
+        ['150605_1501939_srv-smart360-web2_full.tar.gpg.00','150603_1501539_srv-smart360-web1_full.tar.gpg.00']
         '''
         delete_list = []
         keep = self.backup_keep()
-        print keep
         bk_info = self.backup_info(self.keyList)
         for key in bk_info:
             if key['putTime'] not in keep:
                 delete_list.append(key['key'])
         return delete_list
 
+    def record_log(self,str):
+        '''
+        record the delete log to logfile.
+        the defination of logfile in the CONFIG_CLEAN_FILE.
+        '''
+        logFile = self.cleancnf['logfile']
+        dirName = os.path.dirname(logFile)
+        # Determine whether a directory exists
+        if (check_dir(dirName) == -1):
+            try:
+                os.mkdir(dirName)
+            except OSError,e:
+                print '*** Caught exception %s\n' % e
+                return -1
+
+        # Log to file
+        try:
+            with open(logFile,'a+') as f:
+                f.write(str)
+        except IOError,e:
+            print '*** Caught exception %s\n' % e
+            return -1
+
 def main():
     from optparse import OptionParser
     parser = OptionParser()
     parser.add_option("-l", "--list", action="store_true", dest="list", help="list files in your bucket ")
     parser.add_option("", "--delete", dest="delete", help="from your bucket delete a file ")
+    parser.add_option("-c", "--clean", action="store_true", dest="clean", help="parse your clean configuration,then delete files ")
     (options, args) = parser.parse_args()
 
     cnf = qiniu_config(CONFIGFILE)
@@ -165,11 +191,14 @@ def main():
         sys.exit(0)
 
     cnfdict = cnf.qiniucnf
+    # the instantiation of qiniu_api
     qn = qiniu_api(cnfdict)
+
     if options.delete:
         status = qn.delete(options.delete)
         print status
         sys.exit(0)
+
     if options.list:
         line_num = 1
         print "backup list:"
@@ -178,14 +207,22 @@ def main():
             line_num += 1 
         sys.exit(0)
 
+    if options.clean:
+        key_list = qn.list_all()
 
-    key_list = qn.list_all()
-
-    # the Instantiation of qiniu_clean class. 
-    qclean=qiniu_clean(key_list)
-    dlist = qclean.backup_clean()
-    for i in dlist:
-        print i,qn.delete(i)
+        # the Instantiation of qiniu_clean class. 
+        qclean=qiniu_clean(key_list)
+        dlist = qclean.backup_clean()
+        for i in dlist:
+            if (qn.delete(i) == 0):
+                str = DATE + " Info " + i + " delete succeed.\n"
+                recordLog = qclean.record_log(str)
+            else:
+                str = DATE + " Error " + i + " delete Failed.\n"
+                recordLog = qclean.record_log(str)
+            if (recordLog == -1):
+                break
+        sys.exit(0)
 
 if __name__ == '__main__':
     main()
