@@ -43,6 +43,7 @@ class qiniu_config(object):
             self.qiniucnf['access_key'] = str(self.decode(config.get("qiniu","access_key"),SECRET))
             self.qiniucnf['secret_key'] = str(self.decode(config.get("qiniu","secret_key"),SECRET))
             self.qiniucnf['bucket'] = config.get("qiniu","bucket")
+            self.qiniucnf['bucket_domain'] = config.get("qiniu","bucket_domain")
             self.qiniucnf['retries'] = config.get("options", 'connection_retries')
             self.qiniucnf['timeout'] = config.get("options", 'connection_timeout')
             self.qiniucnf['connection_pool'] = config.get("options", 'connection_pool')
@@ -89,6 +90,7 @@ class qiniu_config(object):
         access_key = raw_input("Please input your AccessKey: ")
         secret_key = raw_input("Please input your SecretKey: ")
         bucket = raw_input("Please input your bucket: ")
+        bucket_domain = raw_input("Please input your bucket_domain: ")
         
         try:
             Access = self.encode(access_key,SECRET)
@@ -103,6 +105,7 @@ class qiniu_config(object):
         config.set("qiniu", 'access_key', Access)
         config.set("qiniu", 'secret_key', Secret)
         config.set("qiniu", 'bucket', bucket)
+        config.set("qiniu", 'bucket_domain', bucket_domain)
         config.set("options", 'connection_retries', 3)
         config.set("options", 'connection_timeout', 15)
         config.set("options", 'connection_pool', 10)
@@ -117,6 +120,7 @@ class qiniu_api(object):
         self.q = Auth(self.cnfconfig['access_key'], self.cnfconfig['secret_key'])
         self.bucket = BucketManager(self.q)
         self.bucket_name = self.cnfconfig['bucket']
+        self.bucket_domain = self.cnfconfig['bucket_domain']
         # set connect options
         qiniuconfig.set_default(connection_retries = int(self.cnfconfig['retries']))
         qiniuconfig.set_default(connection_timeout = int(self.cnfconfig['timeout']))
@@ -195,8 +199,7 @@ class qiniu_api(object):
         '''
         import requests
         key = key_name
-        bucket_domain = '7xkfid.com1.z0.glb.clouddn.com'
-        base_url = 'http://%s/%s' % (bucket_domain, key)
+        base_url = 'http://%s/%s' % (self.bucket_domain, key)
         private_url = self.q.private_download_url(base_url, expires=3600)
         dfile = requests.get(private_url)
         with open(key, 'wb') as code:
