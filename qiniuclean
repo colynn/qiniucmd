@@ -153,7 +153,7 @@ class qiniu_clean(object):
                 delete_list.append(key['key'])
         return delete_list
 
-    def record_log(self,str):
+    def record_log(self,logInfo):
         '''
         record the delete log to logfile.
         the defination of logfile in the CONFIG_CLEAN_FILE.
@@ -171,7 +171,7 @@ class qiniu_clean(object):
         # Log to file
         try:
             with open(logFile,'a+') as f:
-                f.write(str)
+                f.write(logInfo)
         except IOError,e:
             print '*** Caught exception %s\n' % e
             return -1
@@ -215,11 +215,11 @@ def main():
         dlist = qclean.backup_clean()
         for i in dlist:
             if (qn.delete(i) == 0):
-                str = DATE + " Info " + i + " delete succeed.\n"
-                recordLog = qclean.record_log(str)
+                logInfo = DATE + " Info " + i + " delete succeed.\n"
+                recordLog = qclean.record_log(logInfo)
             else:
-                str = DATE + " Error " + i + " delete Failed.\n"
-                recordLog = qclean.record_log(str)
+                logInfo = DATE + " Error " + i + " delete Failed.\n"
+                recordLog = qclean.record_log(logInfo)
             if (recordLog == -1):
                 break
         sys.exit(0)
