@@ -4,7 +4,12 @@ from distutils.core import setup
 
 setup(name='qiniucmd',  
     version = '1.0',  
-    packages = ['qiniu'],
+    packages = [
+    'qiniu',
+    'qiniu.services',
+    'qiniu.services.storage',
+    'qiniu.services.processing',
+    ],
     scripts = ['qiniucmd'],
     description = 'Command line tool for managing Qiniu Resource Storage',
     long_description = 'qiniucmd is a command line tool for uploading,retrieving and managing data in QiNiu Resource Storage.',  
