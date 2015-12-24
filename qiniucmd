@@ -169,6 +169,7 @@ class qiniu_api(object):
           1 upload status succeed, etag value is false.
           2 upload status failed, etag value is false.
           3 exist duplicate file, directly return.
+          401 认证授权失败，可能是密钥信息不正确、数字签名错误或授权已超时.
         '''
         check_localfile(localfile)
         localfile_name = basename(localfile)
@@ -190,6 +191,8 @@ class qiniu_api(object):
                 return 0
             else:
                 return 1
+        elif info.status_code == 401:
+            return 401
         else:
             return 2
 
